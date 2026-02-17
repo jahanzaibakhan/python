@@ -2472,6 +2472,7 @@ class HealthReportGenerator:
         self.site_url = site_url
         self.log_path = log_path
         self.output_path = output_path or "/mnt/user-data/outputs"
+      self.output_buffer = []  # <--- Add this line to catch CLI text
         self.report = {
             'site_url': site_url,
             'timestamp': datetime.now().isoformat(),
@@ -2620,22 +2621,29 @@ class HealthReportGenerator:
         print(f"  • Max Concurrent Users: {self.report['capacity'].get('estimated_max_concurrent_users', 'N/A')}")
         print(f"  • Database Size: {self.report['backend'].get('database', {}).get('total_size', 'N/A')}")
     
-    def _save_json_report(self):
-        """Save report to JSON file"""
-        filename = f"wp_health_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+   def _save_log_report(self):
+        """Saves the buffered CLI output to a .log file"""
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"wp_health_report_{timestamp}.log"
         filepath = os.path.join(self.output_path, filename)
         
         try:
-            os.makedirs(self.output_path, exist_ok=True)
+            if not os.path.exists(self.output_path):
+                os.makedirs(self.output_path)
             
-            with open(filepath, 'w') as f:
-                json.dump(self.report, f, indent=2)
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write("\n".join(self.output_buffer))
             
-            print(f"\n{Colors.GREEN}Report saved to: {filepath}{Colors.RESET}")
-            return filepath
+            print(f"\n{Colors.GREEN}Full detailed report saved to: {filepath}{Colors.RESET}")
         except Exception as e:
-            print(f"{Colors.RED}Error saving report: {e}{Colors.RESET}")
-            return None
+            print(f"{Colors.RED}Error saving log file: {e}{Colors.RESET}")
+
+def log_print(self, text=""):
+        """Prints to terminal and saves to buffer without color codes."""
+        print(text)
+        # Strip ANSI color codes before saving to the buffer/file
+        clean_text = re.sub(r'\033\[[0-9;]*m', '', str(text))
+        self.output_buffer.append(clean_text)
 
 
 def main():
