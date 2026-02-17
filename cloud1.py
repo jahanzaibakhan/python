@@ -2465,6 +2465,24 @@ class PluginProfiler(WordPressHealthMonitor):
         return results
 
 
+class _TeeOutput:
+    """Write to both original stdout and a capture buffer simultaneously"""
+    def __init__(self, original, capture):
+        self.original = original
+        self.capture = capture
+
+    def write(self, data):
+        self.original.write(data)
+        self.capture.write(data)
+
+    def flush(self):
+        self.original.flush()
+        self.capture.flush()
+
+    def isatty(self):
+        return self.original.isatty()
+
+
 class HealthReportGenerator:
     """Generate comprehensive health report"""
     
@@ -2487,6 +2505,11 @@ class HealthReportGenerator:
     
     def generate_full_report(self):
         """Generate complete health report"""
+        import sys, io
+        self._log_capture = io.StringIO()
+        self._tee = _TeeOutput(sys.stdout, self._log_capture)
+        sys.stdout = self._tee
+
         print(f"{Colors.BOLD}{Colors.CYAN}")
         print("=" * 70)
         print("WORDPRESS/WOOCOMMERCE COMPREHENSIVE HEALTH REPORT")
@@ -2621,44 +2644,26 @@ class HealthReportGenerator:
         print(f"  • Database Size: {self.report['backend'].get('database', {}).get('total_size', 'N/A')}")
     
     def _save_json_report(self):
-        """Save report to log file"""
+        """Save CLI output to log file"""
+        import sys
         filename = f"wp_health_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
         filepath = os.path.join(self.output_path, filename)
-        
+
+        # Restore stdout before writing
+        if hasattr(self, '_tee'):
+            sys.stdout = self._tee.original
+
         try:
             os.makedirs(self.output_path, exist_ok=True)
-            
-            def flatten_log(data, prefix=''):
-                lines = []
-                if isinstance(data, dict):
-                    for key, value in data.items():
-                        flat_key = f"{prefix}.{key}" if prefix else key
-                        lines.extend(flatten_log(value, flat_key))
-                elif isinstance(data, list):
-                    for i, item in enumerate(data):
-                        flat_key = f"{prefix}[{i}]"
-                        lines.extend(flatten_log(item, flat_key))
-                else:
-                    lines.append(f"{prefix} = {data}")
-                return lines
-            
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            log_lines = [
-                f"[{timestamp}] INFO WordPress Health Report",
-                f"[{timestamp}] INFO Site: {self.site_url}",
-                f"[{timestamp}] INFO " + "-" * 60,
-            ]
-            
-            for line in flatten_log(self.report):
-                level = "ERROR" if "critical" in str(line).lower() else "WARN" if "warning" in str(line).lower() else "INFO"
-                log_lines.append(f"[{timestamp}] {level} {line}")
-            
-            log_lines.append(f"[{timestamp}] INFO " + "-" * 60)
-            log_lines.append(f"[{timestamp}] INFO Report generation complete")
-            
+
+            # Get captured output and strip ANSI color codes
+            raw_output = self._log_capture.getvalue() if hasattr(self, '_log_capture') else ''
+            ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+            clean_output = ansi_escape.sub('', raw_output)
+
             with open(filepath, 'w') as f:
-                f.write('\n'.join(log_lines) + '\n')
-            
+                f.write(clean_output)
+
             print(f"\n{Colors.GREEN}Report saved to: {filepath}{Colors.RESET}")
             return filepath
         except Exception as e:
