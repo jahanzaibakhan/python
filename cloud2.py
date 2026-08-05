@@ -2669,11 +2669,41 @@ class HealthReportGenerator:
             with open(filepath, 'w') as f:
                 f.write(clean_output)
 
+            self._ensure_txt_cors_for_sitesleuth(filepath)
+
             print(f"\n{Colors.GREEN}Report saved to: {filepath}{Colors.RESET}")
             return filepath
         except Exception as e:
             print(f"{Colors.RED}Error saving report: {e}{Colors.RESET}")
             return None
+
+    def _ensure_txt_cors_for_sitesleuth(self, report_filepath: str):
+        """Allow SiteSleuth (browser fetch) to read .txt reports cross-origin."""
+        try:
+            out_dir = os.path.dirname(os.path.abspath(report_filepath))
+            htaccess = os.path.join(out_dir, '.htaccess')
+            marker = '# SiteSleuth CORS for investigation .txt reports'
+            block = (
+                f"\n{marker}\n"
+                "<IfModule mod_headers.c>\n"
+                "  <FilesMatch \"\\.(txt)$\">\n"
+                "    Header set Access-Control-Allow-Origin \"*\"\n"
+                "  </FilesMatch>\n"
+                "</IfModule>\n"
+            )
+            if os.path.isfile(htaccess):
+                with open(htaccess, 'r') as f:
+                    existing = f.read()
+                if marker in existing:
+                    return
+                with open(htaccess, 'a') as f:
+                    f.write(block)
+            else:
+                with open(htaccess, 'w') as f:
+                    f.write(block.lstrip('\n'))
+            print(f"{Colors.GREEN}CORS enabled for .txt in {htaccess} (SiteSleuth browser fetch){Colors.RESET}")
+        except Exception as e:
+            print(f"{Colors.YELLOW}Note: could not update .htaccess for CORS ({e}){Colors.RESET}")
 
 
 def main():
