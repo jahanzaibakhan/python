@@ -2492,9 +2492,10 @@ class HealthReportGenerator:
     """Generate comprehensive health report"""
     
     def __init__(self, site_url: str, log_path: str = None, output_path: str = None):
-        self.site_url = site_url
+        self.site_url = site_url.rstrip("/")
         self.log_path = log_path
-        self.output_path = output_path or "/mnt/user-data/outputs"
+        # Default: current working directory (where you ran the script)
+        self.output_path = os.path.abspath(output_path or os.getcwd())
         self.report = {
             'site_url': site_url,
             'timestamp': datetime.now().isoformat(),
@@ -2521,6 +2522,7 @@ class HealthReportGenerator:
         print("=" * 70)
         print(f"{Colors.RESET}")
         print(f"Site: {self.site_url}")
+        print(f"Output directory: {self.output_path}")
         print(f"Report Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
         # Frontend Metrics
@@ -2672,56 +2674,55 @@ class HealthReportGenerator:
             self._ensure_txt_cors_for_sitesleuth(filepath)
 
             print(f"\n{Colors.GREEN}Report saved to: {filepath}{Colors.RESET}")
-            download_url = self._public_download_url(filepath)
-            if download_url:
-                self._print_download_banner(filepath, download_url)
+            download_url = self._public_download_url(filepath) or ""
+            self._print_download_banner(filepath, download_url)
             return filepath
         except Exception as e:
             print(f"{Colors.RED}Error saving report: {e}{Colors.RESET}")
             return None
 
     def _public_download_url(self, filepath: str):
-        """Build HTTPS URL for the saved .txt (web path under site_url)."""
+        """Build HTTPS URL from site_url + path relative to public_html."""
         try:
             from urllib.parse import urljoin
-            filename = os.path.basename(filepath)
-            abs_file = os.path.abspath(filepath)
-            abs_out = os.path.abspath(self.output_path)
+            abs_file = os.path.abspath(filepath).replace("\\", "/")
+            filename = os.path.basename(abs_file)
 
-            web_subpath = ""
-            normalized = abs_out.replace("\\", "/")
+            rel = filename
+            lower = abs_file.lower()
             marker = "/public_html"
-            if marker in normalized:
-                tail = normalized.split(marker, 1)[1].strip("/")
-                web_subpath = tail.replace("\\", "/")
+            if marker in lower:
+                tail = abs_file[lower.index(marker) + len(marker):].lstrip("/")
+                rel = tail if tail else filename
 
-            if web_subpath:
-                rel = f"{web_subpath}/{filename}"
-            elif abs_file.startswith(abs_out):
-                rel = filename
-            else:
-                rel = filename
-
-            base = self.site_url.rstrip("/") + "/"
-            return urljoin(base, rel)
+            return urljoin(self.site_url + "/", rel)
         except Exception:
             return None
 
+    def _is_under_public_html(self, filepath: str) -> bool:
+        return "/public_html" in os.path.abspath(filepath).replace("\\", "/").lower()
+
     def _print_download_banner(self, filepath: str, download_url: str):
         """Prominent end-of-run block: public URL + SiteSleuth upload hint."""
+        abs_path = os.path.abspath(filepath)
+        web_ok = self._is_under_public_html(filepath)
         print(f"\n{Colors.BOLD}{Colors.CYAN}{'=' * 70}")
         print("DOWNLOAD LINK — SiteSleuth investigation log")
         print(f"{'=' * 70}{Colors.RESET}")
-        print(f"{Colors.GREEN}Public URL (open or wget):{Colors.RESET}")
-        print(f"  {download_url}")
-        print(f"\n{Colors.CYAN}Local path on server:{Colors.RESET}")
-        print(f"  {os.path.abspath(filepath)}")
+        print(f"{Colors.CYAN}Saved to (same folder you ran the script):{Colors.RESET}")
+        print(f"  {abs_path}")
+        if web_ok and download_url:
+            print(f"\n{Colors.GREEN}Public download URL:{Colors.RESET}")
+            print(f"  {download_url}")
+            print(f"\n{Colors.CYAN}Quick download:{Colors.RESET}")
+            print(f"  curl -fsSL \"{download_url}\" -o wp_health_report.txt")
+        else:
+            print(f"\n{Colors.YELLOW}Note:{Colors.RESET} File is not under public_html — no public URL.")
+            print("  Run the script from the app public_html folder for a browser download link.")
         print(f"\n{Colors.YELLOW}SiteSleuth:{Colors.RESET}")
-        print("  1) Open the Public URL above → Save/download the .txt file")
-        print("  2) In SiteSleuth → case → Upload log file (.txt) OR paste log text")
-        print("  3) Run AI investigation (log is attached from your upload/paste)")
-        print(f"\n{Colors.CYAN}Quick download (from any machine):{Colors.RESET}")
-        print(f"  curl -fsSL \"{download_url}\" -o wp_health_report.txt")
+        print("  1) Download/open the .txt (public URL above, or scp the local path)")
+        print("  2) SiteSleuth → case → Upload log file (.txt)")
+        print("  3) Run AI investigation")
         print(f"{Colors.BOLD}{Colors.CYAN}{'=' * 70}{Colors.RESET}\n")
 
     def _ensure_txt_cors_for_sitesleuth(self, report_filepath: str):
@@ -2763,30 +2764,27 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Examples:
-  %(prog)s https://example.com
-  %(prog)s https://example.com --log-path /var/log/nginx
-  %(prog)s https://example.com --log-path ../logs --output-path ./public_html
-  %(prog)s https://example.com --skip-plugins  # Skip plugin profiling
-
-Cloudways (browser-friendly .txt in public_html):
-  cd /home/.../public_html
+  cd /home/master/applications/APP/public_html
   curl -s https://raw.githubusercontent.com/jahanzaibakhan/python/main/cloud2.py | python3 - \\
-    https://example.com --log-path ../logs --output-path .
+    https://example.com --log-path ../logs
+
+  # Optional custom output folder:
+  %(prog)s https://example.com --output-path /tmp/reports
         '''
     )
     
     parser.add_argument('site_url', help='WordPress site URL (e.g., https://example.com)')
     parser.add_argument('--log-path', '-l', default='../logs',
-                       help='Path to log files (supports wildcards like /path/*woocommerce*.log). Default: ../logs')
-    parser.add_argument('--output-path', '-o', default='/mnt/user-data/outputs',
-                       help='Directory for the .txt report file. On Cloudways use ./public_html. Default: /mnt/user-data/outputs')
+                       help='Path to log files. Default: ../logs')
+    parser.add_argument('--output-path', '-o', default=None,
+                       help='Directory for the .txt report. Default: current working directory (where you run the script)')
     parser.add_argument('--skip-plugins', action='store_true',
                        help='Skip plugin performance profiling (faster execution)')
     
     args = parser.parse_args()
     
-    # Generate full report
-    reporter = HealthReportGenerator(args.site_url, log_path=args.log_path, output_path=args.output_path)
+    output_path = os.path.abspath(args.output_path) if args.output_path else os.getcwd()
+    reporter = HealthReportGenerator(args.site_url, log_path=args.log_path, output_path=output_path)
     
     # You can skip plugin profiling by setting this before generate_full_report
     if args.skip_plugins:
