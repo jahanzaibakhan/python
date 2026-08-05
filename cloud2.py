@@ -2672,10 +2672,57 @@ class HealthReportGenerator:
             self._ensure_txt_cors_for_sitesleuth(filepath)
 
             print(f"\n{Colors.GREEN}Report saved to: {filepath}{Colors.RESET}")
+            download_url = self._public_download_url(filepath)
+            if download_url:
+                self._print_download_banner(filepath, download_url)
             return filepath
         except Exception as e:
             print(f"{Colors.RED}Error saving report: {e}{Colors.RESET}")
             return None
+
+    def _public_download_url(self, filepath: str):
+        """Build HTTPS URL for the saved .txt (web path under site_url)."""
+        try:
+            from urllib.parse import urljoin
+            filename = os.path.basename(filepath)
+            abs_file = os.path.abspath(filepath)
+            abs_out = os.path.abspath(self.output_path)
+
+            web_subpath = ""
+            normalized = abs_out.replace("\\", "/")
+            marker = "/public_html"
+            if marker in normalized:
+                tail = normalized.split(marker, 1)[1].strip("/")
+                web_subpath = tail.replace("\\", "/")
+
+            if web_subpath:
+                rel = f"{web_subpath}/{filename}"
+            elif abs_file.startswith(abs_out):
+                rel = filename
+            else:
+                rel = filename
+
+            base = self.site_url.rstrip("/") + "/"
+            return urljoin(base, rel)
+        except Exception:
+            return None
+
+    def _print_download_banner(self, filepath: str, download_url: str):
+        """Prominent end-of-run block: public URL + SiteSleuth upload hint."""
+        print(f"\n{Colors.BOLD}{Colors.CYAN}{'=' * 70}")
+        print("DOWNLOAD LINK — SiteSleuth investigation log")
+        print(f"{'=' * 70}{Colors.RESET}")
+        print(f"{Colors.GREEN}Public URL (open or wget):{Colors.RESET}")
+        print(f"  {download_url}")
+        print(f"\n{Colors.CYAN}Local path on server:{Colors.RESET}")
+        print(f"  {os.path.abspath(filepath)}")
+        print(f"\n{Colors.YELLOW}SiteSleuth:{Colors.RESET}")
+        print("  1) Open the Public URL above → Save/download the .txt file")
+        print("  2) In SiteSleuth → case → Upload log file (.txt) OR paste log text")
+        print("  3) Run AI investigation (log is attached from your upload/paste)")
+        print(f"\n{Colors.CYAN}Quick download (from any machine):{Colors.RESET}")
+        print(f"  curl -fsSL \"{download_url}\" -o wp_health_report.txt")
+        print(f"{Colors.BOLD}{Colors.CYAN}{'=' * 70}{Colors.RESET}\n")
 
     def _ensure_txt_cors_for_sitesleuth(self, report_filepath: str):
         """Allow SiteSleuth (browser fetch) to read .txt reports cross-origin."""
